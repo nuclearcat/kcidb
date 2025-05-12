@@ -11,38 +11,154 @@ Architecture
 
 Kcidb infrastructure is mostly based on Google Cloud services at the moment:
 
-    === Hosts ===  ======================= Google Cloud Project ========================
+```mermaid
+flowchart LR
+    %% ────────────────────────────────────────────
+    %% Hosts
+    %% ────────────────────────────────────────────
+    subgraph Hosts
+        kcidb_grafana["Webserver<br/>kcidb-grafana"]
+        kcidb_query["Client<br/>kcidb-query"]
+    end
 
-    ~ Webserver ~                                                    ~~~~ BigQuery ~~~~~
-    kcidb-grafana <-------------------------------------------------  .. kcidb_XX ..
-                                                                     :   checkouts  :
-    ~~ Client ~~~                                                    :   builds     :
-    kcidb-query <--------------------------------------------------- :   tests      :
-                                                                      ''''''''''''''
-                    ~~ Pub/Sub ~~       ~~~~ Cloud Functions ~~~~            ^
-                    kcidb_trigger ----------.                                |
-                                            v                                |
-    kcidb-submit -> kcidb_new --------> kcidb_load_queue --------------------'
-                                            |
-                          .-----------------'
-                          v                                          ~~~~ Firestore ~~~~
-                    kcidb_updated ----> kcidb_spool_notifications -> notifications
-                                                                           |
-                                                   .-----------------------'
-                                                   |
-                                                   v                 ~ Secret Manager ~~
-                                        kcidb_send_notification <--- kcidb_smtp_password
-                                                   |
-                                                   |                 ~~~~~~ GMail ~~~~~~
-                                                   `---------------> bot@kernelci.org
+    %% ────────────────────────────────────────────
+    %% Google Cloud Project
+    %% ────────────────────────────────────────────
+    subgraph "Google Cloud Project"
+        subgraph CloudSQL
+            kcidb_XX["kcidb_XX<br/>checkouts<br/>builds<br/>tests"]
+        end
 
-BigQuery stores the report dataset and serves it to Grafana dashboards hosted
+        subgraph "Pub/Sub"
+            kcidb_trigger["kcidb_trigger"]
+            kcidb_load_queue["kcidb_load_queue"]
+            kcidb_new["kcidb_new"]
+        end
+
+        subgraph "Cloud Functions"
+            kcidb_updated["kcidb_updated"]
+            kcidb_spool_notifications["kcidb_spool_notifications"]
+            kcidb_send_notification["kcidb_send_notification"]
+        end
+
+        subgraph Firestore
+            notifications["notifications"]
+        end
+
+        subgraph "Secret Manager"
+            kcidb_smtp_password["kcidb_smtp_password"]
+        end
+
+        subgraph Gmail
+            bot["bot\@kernelci.org"]
+        end
+    end
+
+    %% ────────────────────────────────────────────
+    %% Azure Project
+    %% ────────────────────────────────────────────
+    subgraph "Azure Project"
+        kcidb_rest["kcidb_rest"]
+        spool((SPOOL))
+        kcidb_ingester["kcidb_ingester"]
+        kcidb_logspec["kcidb_logspec"]
+        kcidb_webdashboard["kcidb_webdashboard"]
+    end
+
+    %% ────────────────────────────────────────────
+    %% External trigger
+    %% ────────────────────────────────────────────
+    kcidb_submit(["kcidb-submit, external submitters"])
+
+    %% SPOOL object
+    
+
+    %% ────────────────────────────────────────────
+    %% Flows
+    %% ────────────────────────────────────────────
+    kcidb_XX --> kcidb_grafana
+    kcidb_XX --> kcidb_query
+    kcidb_XX --> kcidb_webdashboard
+
+    kcidb_trigger --> kcidb_new
+    kcidb_submit --> kcidb_new
+    kcidb_new --> kcidb_load_queue
+    kcidb_load_queue --> kcidb_XX
+    kcidb_load_queue --> kcidb_updated
+    kcidb_updated --> kcidb_spool_notifications
+    kcidb_spool_notifications --> notifications
+    notifications --> kcidb_send_notification
+    kcidb_smtp_password --> kcidb_send_notification
+    kcidb_send_notification --> bot
+
+    %% New Azure path
+    kcidb_submit --> kcidb_rest
+    kcidb_rest --> spool
+    spool --> kcidb_ingester
+    kcidb_ingester --> kcidb_XX
+    kcidb_XX --> kcidb_logspec
+    kcidb_logspec --> spool
+```
+
+CloudSQL(PostgreSQL) stores the report dataset and serves it to Grafana dashboards hosted
 on kcidb.kernelci.org, as well as to any clients invoking `kcidb-query` or
 using the kcidb library to query the database.
 
-Whenever a client submits reports, either via `kcidb-submit` or the kcidb
+In the new architecture, client submissions are handled by the `kcidb` REST API, which
+is hosted on Azure. The `kcidb` REST API available at `https://db.kernelci.org/`
+is responsible for receiving client submissions and forwarding them to the `spool` directory.
+The `spool` directory is a temporary storage area where submissions are
+held before being processed. The `kcidb` REST API also handles
+authentication and authorization of clients, ensuring that only
+authorized users can submit data.
+
+The `spool` directory is monitored by the `kcidb_ingester`, which is a
+background process that continuously checks the `spool` directory for new
+submissions. When a new submission is detected, the `kcidb_ingester`
+processes it (including parsing and validating the data) and then
+inserts it into the PostgreSQL database. The `kcidb_ingester` process
+ensures that the data is properly formatted and adheres to the expected
+schema before being stored in the database. This helps maintain data integrity
+and consistency within the system.
+
+In case of validation errors, the `kcidb_ingester` process logs the errors and
+moves the submission to the `failed` directory for further investigation.
+
+The `kcidb_logspec` process is responsible for identifying and creating
+issues and incidents based on the data stored in the PostgreSQL database and 
+external log artifacts. It analyzes the data and generates reports that can be
+used to identify trends, issues, and potential areas for improvement within the
+KernelCI ecosystem.
+
+`kcidb_webdashboard` is a web-based interface that provides users with
+access to the data stored in the PostgreSQL database. It allows users to
+query and visualize the data, making it easier to analyze and understand
+the results of the KernelCI tests. The web dashboard is designed to be
+user-friendly and provides various features such as filtering, sorting,
+and searching for specific data points. This enables users to quickly
+find the information they need and gain insights into the results of the
+KernelCI tests.
+The `kcidb_webdashboard` is hosted on Azure and is accessible via a web
+browser at URL `https://dashboard.kernelci.org/`.
+
+### New Architecture transition
+
+The new architecture is designed to improve the efficiency and reliability of
+the KernelCI data submission and processing pipeline, reduce costs,
+and make it independent of Google Cloud services (and any other cloud provider).
+The architecture is more modular and flexible, allowing for
+easier integration with other systems and services. It also provides a
+more robust and scalable solution for handling the growing volume of
+KernelCI data submissions.
+
+A major feature of the new architecture is the ability to create self-hosted
+installations of KernelCI, which can be deployed on any cloud provider or on-premises.
+
+### Legacy Architecture
+
+In legacy, whenever a client submits reports, either via `kcidb-submit` or the kcidb
 library, they go to a Pub/Sub message queue topic named `kcidb_new`, then to
-the `kcidb_load_queue` "Cloud Function", which loads the data to the BigQuery
+the `kcidb_load_queue` "Cloud Function", which loads the data to the CloudSQL
 dataset, and then pushes the list of updated objects to `kcidb_updated` topic.
 The `kcidb_load_queue` function is triggered periodically via messages to
 `kcidb_trigger` topic, pushed there by the Cloud Scheduler service.

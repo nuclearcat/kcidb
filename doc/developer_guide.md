@@ -1,6 +1,6 @@
 ---
 title: "Developer guide"
-date: 2021-11-18
+date: 2025-05-12
 draft: false
 weight: 40
 description: "Setting up for KCIDB development"
