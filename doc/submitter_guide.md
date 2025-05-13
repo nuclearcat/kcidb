@@ -1,6 +1,6 @@
 ---
 title: "Submitter guide"
-date: 2021-11-18
+date: 2025-05-13
 draft: false
 weight: 20
 description: "How to submit build and test reports with KCIDB"
@@ -21,41 +21,23 @@ Python 3 library, if you're feeling fancy).
 
 Write to [kernelci@lists.linux.dev](mailto:kernelci@lists.linux.dev),
 introduce yourself, and explain what you want to submit (better, show
-preliminary report data). Once your request is approved, you will get a JSON
-credentials file, which you can use to authenticate yourself with KCIDB
-tools/library.
+preliminary report data). Once your request is approved, you will get a token,
+which you can use to authenticate yourself with KCIDB tools/library.
 
-Export the file location (here `~/.kcidb-credentials.json`) into environment
-like this:
-
+Token and REST endpoint can be set in the environment variable:
 ```bash
-export GOOGLE_APPLICATION_CREDENTIALS=~/.kcidb-credentials.json
+export KCIDB_REST="https://token@db.kernelci.org/"
 ```
 
 We will also need to agree on the "origin" string identifying your system
 among other submitters. We'll use `submitter` in examples below.
 
-Finally you will need to specify some or all of the following to the
-tools/library:
+Initially it is recommended to use the "playground" token and endpoint, which
+will be provided to new users. This is a special setup for testing and
+experimenting with the system.
 
-* Google Cloud project: `kernelci-production`
-* Submission queue topic: `playground_kcidb_new`
-
-The above refers to the special "playground" setup we have, where you can
-freely experiment with your submissions, without worrying about any negative
-effects on the system or other submitters. This setup has a separate database,
-which can be [selected on the
-dashboard](https://kcidb.kernelci.org/?var-datasource=playground). We'll use
-playground parameters in the examples below.
-
-Once you feel comfortable and ready, we'll add extra permissions for your
-account, and you can start using the production parameters:
-
-* Google Cloud project: `kernelci-production`
-* Submission queue topic: `kcidb_new`
-
-The submitted data will appear in our production database, [visible on the
-dashboard by default][dashboard].
+Once you feel comfortable and ready, we'll switch you to the "production"
+token and endpoint, which will be used for production data.
 
 2\. Install KCIDB
 -----------------
@@ -327,15 +309,6 @@ is to put them into an execution outcome chart:
 
 Example: `"FAIL"`
 
-##### `waived`
-True if the test status should be ignored.
-
-Could be used for reporting test results without affecting the overall test
-status and alerting the subscribers. For example, for collecting test
-reliability statistics when the test is first introduced, or is being fixed.
-
-Example: `false`
-
 ##### `path`
 Dot-separated path to the node in the test classification tree the executed
 test belongs to. The empty string signifies the root of the tree, i.e. all
@@ -537,3 +510,14 @@ reporting faster!
 [dashboard]: https://kcidb.kernelci.org/
 [pub_sub_libraries]: https://cloud.google.com/pubsub/docs/reference/libraries
 [pub_sub_apis]: https://cloud.google.com/pubsub/docs/reference/service_apis_overview
+
+### Migration from legacy Pub/Sub to REST API
+
+The legacy Pub/Sub API is deprecated and will be removed in the future. The REST API is the recommended way to interact with KCIDB.
+
+If you are using kcidb as a library, or the `kcidb-submit` tool, you can switch to the REST API by setting the `KCIDB_REST` environment variable to the appropriate endpoint with token.
+```bash
+export KCIDB_REST="https://token@db.kernelci.org/"
+```
+
+After setting the environment variable, you can use the same commands as before, and they will automatically use the REST API instead of the legacy Pub/Sub API.
