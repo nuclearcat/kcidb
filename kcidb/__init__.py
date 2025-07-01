@@ -245,6 +245,19 @@ class Client:
             `NotImplementedError`, if not supplied with a project ID or an MQ
             topic name at initialization time.
         """
+        # TODO: Implement futures/parallelism
+        if self._resturi:
+            try:
+                for data in data_iter:
+                    submission_id = self.rest_submit(data)
+                    if done_cb:
+                        done_cb(submission_id)
+            # pylint: disable=broad-exception-caught
+            except Exception as e:
+                print(f"Error submitting report: {e}",
+                      file=sys.stderr)
+                return None
+            return None
         if not self.mq_publisher:
             raise NotImplementedError
         return self.mq_publisher.publish_iter(data_iter, done_cb=done_cb)
