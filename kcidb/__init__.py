@@ -6,6 +6,9 @@ import logging
 import os
 import re
 import requests
+import concurrent.futures
+from functools import partial
+import time
 from kcidb.misc import LIGHT_ASSERTS
 # Silence flake8 "imported but unused" warning
 from kcidb import io, db, mq, orm, oo, monitor, tests, unittest, misc # noqa
@@ -67,6 +70,7 @@ class Client:
             self._resturi = rest
             self.db_client = None
             self.mq_publisher = None
+            self._executor = None
             # We return early, because this is a new feature
             # and the legacy logic is bypassed in REST-enabled environment
             return
@@ -87,6 +91,19 @@ class Client:
         self.mq_publisher = \
             mq.IOPublisher(project_id, topic_name) \
             if project_id and topic_name else None
+        self._executor = None
+
+    @property
+    def executor(self):
+        """Get or create the thread pool executor for REST submissions."""
+        if self._executor is None:
+            self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+        return self._executor
+
+    def __del__(self):
+        """Cleanup executor on object destruction."""
+        if hasattr(self, '_executor') and self._executor is not None:
+            self._executor.shutdown(wait=True)
 
     def validate_rest_uri(self, uri):
         """
@@ -116,6 +133,50 @@ class Client:
                 return False
             return True
         return False
+
+    def _rest_submit_with_retry(self, data, max_retries=3):
+        """
+        Submit data with retry logic for transient errors.
+
+        Args:
+            data: JSON data to submit
+            max_retries: Maximum number of retry attempts
+
+        Returns:
+            Submission ID string
+        """
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                return self.rest_submit(data)
+            except requests.exceptions.Timeout as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    LOGGER.warning(f"Request timeout, retrying ({attempt + 1}/{max_retries})...")
+                    time.sleep(2 ** attempt)  # Exponential backoff
+                    continue
+            except requests.exceptions.ConnectionError as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    LOGGER.warning(f"Connection error, retrying ({attempt + 1}/{max_retries})...")
+                    time.sleep(2 ** attempt)
+                    continue
+            except requests.exceptions.RequestException as e:
+                # Check if it's a server error (5xx)
+                if hasattr(e, 'response') and e.response is not None:
+                    if e.response.status_code >= 500 and attempt < max_retries - 1:
+                        last_error = e
+                        LOGGER.warning(f"Server error {e.response.status_code}, "
+                                      f"retrying ({attempt + 1}/{max_retries})...")
+                        time.sleep(2 ** attempt)
+                        continue
+                # For client errors or other issues, don't retry
+                raise e
+
+        # If we've exhausted all retries, raise the last error
+        if last_error:
+            raise last_error
 
     def rest_submit(self, data):
         """Submit reports over REST API.
@@ -222,16 +283,17 @@ class Client:
         assert io.SCHEMA.is_compatible(data)
         assert LIGHT_ASSERTS or io.SCHEMA.is_valid(data)
         # Submit over rest if self._rest is set
-        # TODO: future?
         if self._resturi:
-            return self.rest_submit(data)
+            # Submit the REST request with retry using shared executor
+            future = self.executor.submit(self._rest_submit_with_retry, data)
+            return future
         if not self.mq_publisher:
             raise NotImplementedError
         return self.mq_publisher.future_publish(data)
 
-    def submit_iter(self, data_iter, done_cb=None):
+    def submit_iter(self, data_iter, done_cb=None, max_workers=10):
         """
-        Submit reports returned by an iterator.
+        Submit reports returned by an iterator using parallel execution.
 
         Args:
             data_iter:  An iterator returning the JSON report data to submit.
@@ -240,24 +302,41 @@ class Client:
             done_cb:    A function to call when a report is successfully
                         submitted. Will be called with the submission ID of
                         each report returned by the iterator, in order.
+            max_workers: Maximum number of parallel submission threads.
+                        Defaults to 10.
 
         Raises:
             `NotImplementedError`, if not supplied with a project ID or an MQ
             topic name at initialization time.
         """
-        # TODO: Implement futures/parallelism
         if self._resturi:
-            try:
-                for data in data_iter:
-                    submission_id = self.rest_submit(data)
-                    if done_cb:
+            # Convert iterator to list to preserve order for done_cb
+            data_list = list(data_iter)
+            submission_results = []
+
+            # Submit all tasks with retry logic using shared executor
+            future_to_data = {
+                self.executor.submit(self._rest_submit_with_retry, data): (idx, data)
+                for idx, data in enumerate(data_list)
+            }
+
+            # Process completed futures in order
+            for future in concurrent.futures.as_completed(future_to_data):
+                idx, data = future_to_data[future]
+                try:
+                    submission_id = future.result()
+                    submission_results.append((idx, submission_id, None))
+                except Exception as e:
+                    LOGGER.error(f"Error submitting report: {e}")
+                    submission_results.append((idx, None, e))
+
+            # Call done_cb in original order if provided
+            if done_cb:
+                submission_results.sort(key=lambda x: x[0])
+                for idx, submission_id, error in submission_results:
+                    if submission_id and not error:
                         done_cb(submission_id)
-            # pylint: disable=broad-exception-caught
-            except Exception as e:
-                print(f"Error submitting report: {e}",
-                      file=sys.stderr)
-                return None
-            return None
+            return
         if not self.mq_publisher:
             raise NotImplementedError
         return self.mq_publisher.publish_iter(data_iter, done_cb=done_cb)
