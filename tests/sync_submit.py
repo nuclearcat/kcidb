@@ -48,6 +48,8 @@ def main():
                        default=30)
     parser.add_argument("--submissions-dir", "-s", help="Directory containing submission files",
                        default="tests/submissions")
+    parser.add_argument("--max-workers", "-w", type=int, help="Maximum number of worker threads", 
+                       default=10)
     
     args = parser.parse_args()
     
@@ -87,11 +89,11 @@ def main():
     try:
         if rest_uri:
             # When using REST, we don't pass project_id/topic_name
-            client = kcidb.Client()
-            print("Initialized kcidb client for REST API")
+            client = kcidb.Client(max_workers=args.max_workers)
+            print(f"Initialized kcidb client for REST API with {args.max_workers} workers")
         else:
-            client = kcidb.Client(project_id=args.project, topic_name=args.topic)
-            print(f"Initialized kcidb client for PubSub")
+            client = kcidb.Client(project_id=args.project, topic_name=args.topic, max_workers=args.max_workers)
+            print(f"Initialized kcidb client for PubSub with {args.max_workers} workers")
     except Exception as e:
         print(f"Error initializing kcidb client: {e}")
         return 1

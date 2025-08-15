@@ -38,7 +38,7 @@ class Client:
         r'(/.*)?$',
     )
 
-    def __init__(self, database=None, project_id=None, topic_name=None):
+    def __init__(self, database=None, project_id=None, topic_name=None, max_workers=10):
         """
         Initialize a reporting client
 
@@ -53,6 +53,8 @@ class Client:
                             submissions to. The message queue should be
                             located within the specified Google Cloud project.
                             Can be None, to have submitting disabled.
+            max_workers:    Maximum number of worker threads for concurrent
+                            submissions. Defaults to 10.
 
         Raises:
             `kcidb.DatabaseNotInitialized` if the database is not
@@ -60,6 +62,10 @@ class Client:
             `kcidb.db.IncompatibleSchema` if the database schema
             is incompatible with the current I/O schema.
         """
+        # Store max_workers for executor configuration
+        assert isinstance(max_workers, int) and max_workers > 0
+        self._max_workers = max_workers
+
         # verify if environment have KCIDB_REST variable
         rest = os.environ.get("KCIDB_REST")
         if rest:
@@ -97,7 +103,7 @@ class Client:
     def executor(self):
         """Get or create the thread pool executor for REST submissions."""
         if self._executor is None:
-            self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+            self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=self._max_workers)
         return self._executor
 
     def __del__(self):
@@ -291,7 +297,7 @@ class Client:
             raise NotImplementedError
         return self.mq_publisher.future_publish(data)
 
-    def submit_iter(self, data_iter, done_cb=None, max_workers=10):
+    def submit_iter(self, data_iter, done_cb=None):
         """
         Submit reports returned by an iterator using parallel execution.
 
@@ -302,8 +308,6 @@ class Client:
             done_cb:    A function to call when a report is successfully
                         submitted. Will be called with the submission ID of
                         each report returned by the iterator, in order.
-            max_workers: Maximum number of parallel submission threads.
-                        Defaults to 10.
 
         Raises:
             `NotImplementedError`, if not supplied with a project ID or an MQ
