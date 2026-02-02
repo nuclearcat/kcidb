@@ -43,12 +43,6 @@ setuptools.setup(
     # Must match requirements.txt.
     # Let's make that easier, pylint: disable=line-too-long
     install_requires=[
-        "google-cloud-bigquery",
-        "google-cloud-storage",
-        "functions-framework",
-        "google-cloud-firestore",
-        "google-cloud-secret-manager",
-        "google-cloud-logging",
         "flask",
         "psycopg2",
         "jsonschema[format]",
@@ -91,7 +85,6 @@ setuptools.setup(
             "kcidb-db-time = kcidb.db:time_main",
             "kcidb-oo-query = kcidb.oo:query_main",
             "kcidb-tests-validate = kcidb.tests:validate_main",
-            "kcidb-monitor-spool-wipe = kcidb.monitor.spool:wipe_main",
         ]
     ),
     package_data={

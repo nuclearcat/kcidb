@@ -57,19 +57,10 @@ EMPTY_DATABASES = {
 def empty_deployment():
     """Reusable empty (no-data) deployment"""
     yield None
-    project = os.environ["GCP_PROJECT"]
     # Empty all the databases
     kcidb.db.Client(os.environ["KCIDB_OPERATIONAL_DATABASE"]).empty()
     kcidb.db.Client(os.environ["KCIDB_SAMPLE_DATABASE"]).empty()
     kcidb.db.Client(os.environ["KCIDB_ARCHIVE_DATABASE"]).empty()
-    # Wipe the spool
-    kcidb.monitor.spool.Client(
-        os.environ["KCIDB_SPOOL_COLLECTION_PATH"]
-    ).wipe()
-    # Remove contents from the cache bucket
-    bucket_name = os.environ.get("KCIDB_CACHE_BUCKET_NAME")
-    client = kcidb.cache.Client(bucket_name, 0, 0)
-    client.empty()
 
 
 @pytest.fixture

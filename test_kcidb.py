@@ -89,6 +89,46 @@ def test_submit_main():
                     driver_source=driver_source,
                     stdout_re="id\nid\n")
 
+    driver_source = textwrap.dedent("""
+        import os
+        from unittest.mock import patch, Mock
+        from itertools import count
+        os.environ["KCIDB_REST"] = "http://localhost:8080/submit"
+        counter = count()
+        def post(*args, **kwargs):
+            response = Mock()
+            if next(counter) == 0:
+                response.status_code = 500
+                response.text = "fail"
+                response.json = Mock(return_value={})
+                return response
+            response.status_code = 200
+            response.json = Mock(return_value={"id": "id"})
+            response.text = ""
+            return response
+        with patch("kcidb.requests.post", side_effect=post) as post:
+            status = function()
+            assert post.call_count == 2
+        return status
+    """)
+    assert_executes(json.dumps(empty) + json.dumps(empty), *argv,
+                    driver_source=driver_source,
+                    stdout_re="id\n",
+                    stderr_re=".*Error submitting report.*",
+                    status=1)
+
+
+def test_rest_uri_validation():
+    """Check REST URI validation accepts local tokenless URIs."""
+    client = kcidb.Client(rest_uri="http://localhost:8080/submit")
+    assert client._resturi == "http://localhost:8080/submit"
+    try:
+        kcidb.Client(rest_uri="https://example.com/submit")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected ValueError for missing token")
+
 
 def test_query_main():
     """Check kcidb-query works"""

@@ -12,7 +12,6 @@ import time
 from kcidb.misc import LIGHT_ASSERTS
 # Silence flake8 "imported but unused" warning
 from kcidb import io, db, orm, oo, monitor, tests, unittest, misc # noqa
-from kcidb import cache # noqa
 
 
 # Module's logger
@@ -28,7 +27,8 @@ class DatabaseNotInitialized(Exception):
 class Client:
     """Kernel CI reporting client
     Regex for validating REST URI format
-    http(s)://token@host[:port]
+    http(s)://[token@]host[:port][/path]
+    Token may be omitted for local endpoints (e.g. localhost).
     """
     REST_REGEX = re.compile(
         r'^(?:(?P<scheme>https?)://)?'
@@ -37,6 +37,7 @@ class Client:
         r'(?::(?P<port>\d+))?'
         r'(/.*)?$',
     )
+    LOCAL_REST_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0"}
 
     def __init__(self, database=None, rest_uri=None, max_workers=10):
         """
@@ -95,7 +96,7 @@ class Client:
     def validate_rest_uri(self, uri):
         """
         Validate the REST URI format.
-        http(s)://token@host[:port]
+        http(s)://[token@]host[:port][/path]
 
         Args:
             uri: The URI to validate.
@@ -112,7 +113,7 @@ class Client:
             token = match.group('token')
             if scheme and scheme not in ['http', 'https']:
                 return False
-            if not token:
+            if not token and host not in self.LOCAL_REST_HOSTS:
                 return False
             if port and not re.match(r'^\d+$', port):
                 return False
@@ -195,7 +196,8 @@ class Client:
                 url = f"{scheme}://{host}:{port}/submit"
             headers = {'Content-Type': 'application/json'}
             # add token
-            headers['Authorization'] = f"Bearer {token}"
+            if token:
+                headers['Authorization'] = f"Bearer {token}"
             try:
                 response = requests.post(url, json=data,
                                          headers=headers,
@@ -298,6 +300,7 @@ class Client:
         }
 
         # Process completed futures in order
+        errors = []
         for future in concurrent.futures.as_completed(future_to_data):
             idx, data = future_to_data[future]
             try:
@@ -306,6 +309,7 @@ class Client:
             except Exception as e:
                 LOGGER.error(f"Error submitting report: {e}")
                 submission_results.append((idx, None, e))
+                errors.append(e)
 
         # Call done_cb in original order if provided
         if done_cb:
@@ -313,6 +317,10 @@ class Client:
             for idx, submission_id, error in submission_results:
                 if submission_id and not error:
                     done_cb(submission_id)
+        if errors:
+            if len(errors) == 1:
+                raise errors[0]
+            raise RuntimeError(f"{len(errors)} submissions failed") from errors[0]
         return
 
     # We can live with this for now, pylint: disable=too-many-arguments

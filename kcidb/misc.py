@@ -15,7 +15,6 @@ from importlib import metadata
 import dateutil
 import dateutil.relativedelta
 import dateutil.parser
-import google.cloud.secretmanager
 import jsonschema
 import jq
 import kcidb.io as io
@@ -493,26 +492,6 @@ def json_dump_stream(value_iter, fp, indent=0, seq=False):
     for value in value_iter:
         json_dump(value, fp, indent=indent, seq=seq)
         fp.flush()
-
-
-def get_secret(project_id, secret_id):
-    """
-    Get the latest version of a secret from Google Secret Manager.
-
-    Args:
-        project_id: The ID of the Google Cloud project to fetch secrets from.
-        secret_id:  The ID of the secret to fetch latest version of.
-
-    Returns:
-        The latest version of the secret.
-    """
-    assert isinstance(project_id, str) and project_id
-    assert isinstance(secret_id, str) and secret_id
-    client = google.cloud.secretmanager.SecretManagerServiceClient()
-    path = client.secret_version_path(project_id, secret_id, "latest")
-    return client.access_secret_version(
-        request={"name": path}
-    ).payload.data.decode()
 
 
 def merge_dicts(*args, **kwargs):
