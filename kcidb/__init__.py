@@ -11,7 +11,7 @@ from functools import partial
 import time
 from kcidb.misc import LIGHT_ASSERTS
 # Silence flake8 "imported but unused" warning
-from kcidb import io, db, mq, orm, oo, monitor, tests, unittest, misc # noqa
+from kcidb import io, db, orm, oo, monitor, tests, unittest, misc # noqa
 from kcidb import cache # noqa
 
 
@@ -38,7 +38,7 @@ class Client:
         r'(/.*)?$',
     )
 
-    def __init__(self, database=None, project_id=None, topic_name=None, max_workers=10):
+    def __init__(self, database=None, rest_uri=None, max_workers=10):
         """
         Initialize a reporting client
 
@@ -46,13 +46,8 @@ class Client:
             database:       The database specification string to use for
                             accessing the report database.
                             Can be None to have querying disabled.
-            project_id:     ID of the Google Cloud project hosting the message
-                            queue accepting submissions.
-                            Can be None to have submitting disabled.
-            topic_name:     Name of the message queue topic to publish
-                            submissions to. The message queue should be
-                            located within the specified Google Cloud project.
-                            Can be None, to have submitting disabled.
+            rest_uri:       REST URI to use for submissions. If not provided,
+                            the KCIDB_REST environment variable is used.
             max_workers:    Maximum number of worker threads for concurrent
                             submissions. Defaults to 10.
 
@@ -67,36 +62,22 @@ class Client:
         self._max_workers = max_workers
 
         # verify if environment have KCIDB_REST variable
-        rest = os.environ.get("KCIDB_REST")
+        rest = rest_uri or os.environ.get("KCIDB_REST")
         if rest:
             if not isinstance(rest, str) or not rest:
                 raise ValueError("KCIDB_REST must be a non-empty string")
             if not self.validate_rest_uri(rest):
                 raise ValueError("KCIDB_REST must be a valid URI")
             self._resturi = rest
-            self.db_client = None
-            self.mq_publisher = None
-            self._executor = None
-            # We return early, because this is a new feature
-            # and the legacy logic is bypassed in REST-enabled environment
-            return
-
-        self._resturi = None
-        assert database is None or \
-            isinstance(database, str) and database
-        assert project_id is None or \
-            isinstance(project_id, str) and project_id
-        assert topic_name is None or \
-            isinstance(topic_name, str) and topic_name
+        else:
+            self._resturi = None
+        assert database is None or isinstance(database, str) and database
         if database is None:
             self.db_client = None
         else:
             self.db_client = db.Client(database)
             if not self.db_client.is_initialized():
                 raise DatabaseNotInitialized()
-        self.mq_publisher = \
-            mq.IOPublisher(project_id, topic_name) \
-            if project_id and topic_name else None
         self._executor = None
 
     @property
@@ -256,17 +237,13 @@ class Client:
             Submission ID string.
 
         Raises:
-            `NotImplementedError`, if not supplied with a project ID or an MQ
-            topic name at initialization time.
+            `NotImplementedError`, if REST submission is not configured.
         """
         assert io.SCHEMA.is_compatible(data)
         assert LIGHT_ASSERTS or io.SCHEMA.is_valid(data)
-        # Submit over rest if self._rest is set
-        if self._resturi:
-            return self.rest_submit(data)
-        if not self.mq_publisher:
+        if not self._resturi:
             raise NotImplementedError
-        return self.mq_publisher.publish(data)
+        return self.rest_submit(data)
 
     def future_submit(self, data):
         """
@@ -283,19 +260,15 @@ class Client:
             A future which will return the Submission ID string.
 
         Raises:
-            `NotImplementedError`, if not supplied with a project ID or an MQ
-            topic name at initialization time.
+            `NotImplementedError`, if REST submission is not configured.
         """
         assert io.SCHEMA.is_compatible(data)
         assert LIGHT_ASSERTS or io.SCHEMA.is_valid(data)
-        # Submit over rest if self._rest is set
-        if self._resturi:
-            # Submit the REST request with retry using shared executor
-            future = self.executor.submit(self._rest_submit_with_retry, data)
-            return future
-        if not self.mq_publisher:
+        if not self._resturi:
             raise NotImplementedError
-        return self.mq_publisher.future_publish(data)
+        # Submit the REST request with retry using shared executor
+        future = self.executor.submit(self._rest_submit_with_retry, data)
+        return future
 
     def submit_iter(self, data_iter, done_cb=None):
         """
@@ -310,40 +283,37 @@ class Client:
                         each report returned by the iterator, in order.
 
         Raises:
-            `NotImplementedError`, if not supplied with a project ID or an MQ
-            topic name at initialization time.
+            `NotImplementedError`, if REST submission is not configured.
         """
-        if self._resturi:
-            # Convert iterator to list to preserve order for done_cb
-            data_list = list(data_iter)
-            submission_results = []
-
-            # Submit all tasks with retry logic using shared executor
-            future_to_data = {
-                self.executor.submit(self._rest_submit_with_retry, data): (idx, data)
-                for idx, data in enumerate(data_list)
-            }
-
-            # Process completed futures in order
-            for future in concurrent.futures.as_completed(future_to_data):
-                idx, data = future_to_data[future]
-                try:
-                    submission_id = future.result()
-                    submission_results.append((idx, submission_id, None))
-                except Exception as e:
-                    LOGGER.error(f"Error submitting report: {e}")
-                    submission_results.append((idx, None, e))
-
-            # Call done_cb in original order if provided
-            if done_cb:
-                submission_results.sort(key=lambda x: x[0])
-                for idx, submission_id, error in submission_results:
-                    if submission_id and not error:
-                        done_cb(submission_id)
-            return
-        if not self.mq_publisher:
+        if not self._resturi:
             raise NotImplementedError
-        return self.mq_publisher.publish_iter(data_iter, done_cb=done_cb)
+        # Convert iterator to list to preserve order for done_cb
+        data_list = list(data_iter)
+        submission_results = []
+
+        # Submit all tasks with retry logic using shared executor
+        future_to_data = {
+            self.executor.submit(self._rest_submit_with_retry, data): (idx, data)
+            for idx, data in enumerate(data_list)
+        }
+
+        # Process completed futures in order
+        for future in concurrent.futures.as_completed(future_to_data):
+            idx, data = future_to_data[future]
+            try:
+                submission_id = future.result()
+                submission_results.append((idx, submission_id, None))
+            except Exception as e:
+                LOGGER.error(f"Error submitting report: {e}")
+                submission_results.append((idx, None, e))
+
+        # Call done_cb in original order if provided
+        if done_cb:
+            submission_results.sort(key=lambda x: x[0])
+            for idx, submission_id, error in submission_results:
+                if submission_id and not error:
+                    done_cb(submission_id)
+        return
 
     # We can live with this for now, pylint: disable=too-many-arguments
     # Or if you prefer, pylint: disable=too-many-positional-arguments
@@ -437,20 +407,12 @@ def submit_main():
     """Execute the kcidb-submit command-line tool"""
     sys.excepthook = misc.log_and_print_excepthook
     description = \
-        'kcidb-submit - Submit Kernel CI reports, print submission IDs'
+        'kcidb-submit - Submit Kernel CI reports over REST, print IDs'
     parser = misc.InputArgumentParser(description=description)
-    parser.add_argument(
-        '-p', '--project',
-        help='ID of the Google Cloud project containing the message queue',
-        required=True
-    )
-    parser.add_argument(
-        '-t', '--topic',
-        help='Name of the message queue topic to publish to',
-        required=True
-    )
     args = parser.parse_args()
-    client = Client(project_id=args.project, topic_name=args.topic)
+    if not os.environ.get("KCIDB_REST"):
+        parser.error("KCIDB_REST environment variable is required")
+    client = Client()
 
     def print_submission_id(submission_id):
         print(submission_id, file=sys.stdout)

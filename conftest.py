@@ -58,12 +58,6 @@ def empty_deployment():
     """Reusable empty (no-data) deployment"""
     yield None
     project = os.environ["GCP_PROJECT"]
-    # Empty the load queue subscription
-    topic = os.environ["KCIDB_LOAD_QUEUE_TOPIC"]
-    subscription = os.environ["KCIDB_LOAD_QUEUE_SUBSCRIPTION"]
-    for _ in kcidb.mq.IOSubscriber(project, topic, subscription). \
-            pull_iter(timeout=30):
-        pass
     # Empty all the databases
     kcidb.db.Client(os.environ["KCIDB_OPERATIONAL_DATABASE"]).empty()
     kcidb.db.Client(os.environ["KCIDB_SAMPLE_DATABASE"]).empty()
@@ -72,13 +66,6 @@ def empty_deployment():
     kcidb.monitor.spool.Client(
         os.environ["KCIDB_SPOOL_COLLECTION_PATH"]
     ).wipe()
-    # Empty the mock SMTP queue subscription
-    topic = os.environ.get("KCIDB_SMTP_TOPIC")
-    subscription = os.environ.get("KCIDB_SMTP_SUBSCRIPTION")
-    if topic and subscription:
-        for _ in kcidb.mq.EmailSubscriber(project, topic, subscription). \
-                pull_iter(timeout=30):
-            pass
     # Remove contents from the cache bucket
     bucket_name = os.environ.get("KCIDB_CACHE_BUCKET_NAME")
     client = kcidb.cache.Client(bucket_name, 0, 0)
