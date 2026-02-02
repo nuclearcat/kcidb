@@ -55,7 +55,7 @@ def test_submit_main():
 
     empty = kcidb.io.SCHEMA.new()
 
-    driver_source = textwrap.dedent(f"""
+    driver_source = textwrap.dedent("""
         import os
         from unittest.mock import patch, Mock
         os.environ["KCIDB_REST"] = "https://token@example.com"
@@ -72,7 +72,7 @@ def test_submit_main():
                     driver_source=driver_source,
                     stdout_re="id\n")
 
-    driver_source = textwrap.dedent(f"""
+    driver_source = textwrap.dedent("""
         import os
         from unittest.mock import patch, Mock
         os.environ["KCIDB_REST"] = "https://token@example.com"

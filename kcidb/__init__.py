@@ -7,7 +7,6 @@ import os
 import re
 import requests
 import concurrent.futures
-from functools import partial
 import time
 from kcidb.misc import LIGHT_ASSERTS
 # Silence flake8 "imported but unused" warning
@@ -85,7 +84,9 @@ class Client:
     def executor(self):
         """Get or create the thread pool executor for REST submissions."""
         if self._executor is None:
-            self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=self._max_workers)
+            self._executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=self._max_workers
+            )
         return self._executor
 
     def __del__(self):
@@ -141,22 +142,36 @@ class Client:
             except requests.exceptions.Timeout as e:
                 last_error = e
                 if attempt < max_retries - 1:
-                    LOGGER.warning(f"Request timeout, retrying ({attempt + 1}/{max_retries})...")
+                    LOGGER.warning(
+                        "Request timeout, retrying (%s/%s)...",
+                        attempt + 1,
+                        max_retries,
+                    )
                     time.sleep(2 ** attempt)  # Exponential backoff
                     continue
             except requests.exceptions.ConnectionError as e:
                 last_error = e
                 if attempt < max_retries - 1:
-                    LOGGER.warning(f"Connection error, retrying ({attempt + 1}/{max_retries})...")
+                    LOGGER.warning(
+                        "Connection error, retrying (%s/%s)...",
+                        attempt + 1,
+                        max_retries,
+                    )
                     time.sleep(2 ** attempt)
                     continue
             except requests.exceptions.RequestException as e:
                 # Check if it's a server error (5xx)
                 if hasattr(e, 'response') and e.response is not None:
-                    if e.response.status_code >= 500 and attempt < max_retries - 1:
+                    is_server_error = e.response.status_code >= 500
+                    should_retry = attempt < max_retries - 1
+                    if is_server_error and should_retry:
                         last_error = e
-                        LOGGER.warning(f"Server error {e.response.status_code}, "
-                                      f"retrying ({attempt + 1}/{max_retries})...")
+                        LOGGER.warning(
+                            "Server error %s, retrying (%s/%s)...",
+                            e.response.status_code,
+                            attempt + 1,
+                            max_retries,
+                        )
                         time.sleep(2 ** attempt)
                         continue
                 # For client errors or other issues, don't retry
@@ -295,7 +310,10 @@ class Client:
 
         # Submit all tasks with retry logic using shared executor
         future_to_data = {
-            self.executor.submit(self._rest_submit_with_retry, data): (idx, data)
+            self.executor.submit(
+                self._rest_submit_with_retry,
+                data,
+            ): (idx, data)
             for idx, data in enumerate(data_list)
         }
 
@@ -320,7 +338,9 @@ class Client:
         if errors:
             if len(errors) == 1:
                 raise errors[0]
-            raise RuntimeError(f"{len(errors)} submissions failed") from errors[0]
+            raise RuntimeError(
+                f"{len(errors)} submissions failed"
+            ) from errors[0]
         return
 
     # We can live with this for now, pylint: disable=too-many-arguments
