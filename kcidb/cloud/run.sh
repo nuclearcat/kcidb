@@ -88,7 +88,7 @@ function run_service_withdraw() {
 #       --cost-upd-service-account=EMAIL
 #       --iss-ed-service=NAME
 #       --iss-ed-image=URL
-#       --new-topic=STRING
+#       --rest-uri=STRING
 function run_deploy() {
     declare params
     params="$(getopt_vars project \
@@ -105,9 +105,13 @@ function run_deploy() {
                           cost_upd_service_account \
                           iss_ed_service \
                           iss_ed_image \
-                          new_topic \
+                          rest_uri \
                           -- "$@")"
     eval "$params"
+    if [ -z "$rest_uri" ]; then
+        echo "Missing --rest-uri for issue editor submissions" >&2
+        exit 1
+    fi
     declare iam_command
 
     # Deploy Grafana
@@ -259,10 +263,8 @@ YAML_END
                       cpu: "0.25"
                       memory: "256M"
                   env:
-                    - name: KCIDB_PROJECT
-                      value: $project
-                    - name: KCIDB_NEW_TOPIC
-                      value: $new_topic
+                    - name: KCIDB_REST
+                      value: $rest_uri
 YAML_END
 }
 

@@ -77,18 +77,17 @@ function app_deploy() {
 #       --namespace=STRING
 #       --extra-cc=ADDRS
 #       --smtp-to-addrs=STRING
-#       --smtp-mocked=true|false
 #       --test=true|false
 #       --log-level=NAME
 #       --optimize=PYTHONOPTIMIZE
 #       --heavy-asserts=true|false
 #       --updated-publish=true|false
 #       --updated-urls-publish=true|false
-#       --submitters=WORDS
 #       --cost-thresholds=JSON
 #       --grafana-url=URL
 #       --grafana-public=true|false
 #       --grafana-anonymous=true|false
+#       --rest-uri=URL
 #       --argv=WORDS
 function execute_command() {
     declare params
@@ -99,14 +98,11 @@ function execute_command() {
                           namespace \
                           extra_cc \
                           smtp_to_addrs \
-                          smtp_mocked \
                           test \
                           log_level \
                           optimize \
                           heavy_asserts \
-                          updated_publish \
-                          updated_urls_publish \
-                          submitters \
+                          rest_uri \
                           cost_thresholds \
                           grafana_url \
                           grafana_public \
@@ -114,30 +110,18 @@ function execute_command() {
                           argv \
                           -- "$@")"
     eval "$params"
-    # Convert submitters and extra args from a string of words to an array
-    eval "declare -a submitters=($submitters)"
+    # Convert extra args from a string of words to an array
     eval "declare -a argv=($argv)"
 
     declare -r prefix="${namespace}_"
     declare -r dashed_prefix="${prefix//[^a-z0-9-]/-}"
 
-    declare -r load_queue_trigger_topic="${prefix}load_queue_trigger"
     declare -r cache_bucket_name="${project}_${prefix}cache"
-    declare -r pick_notifications_trigger_topic="${prefix}pick_notifications_trigger"
-    declare -r purge_db_trigger_topic="${prefix}purge_db_trigger"
-    declare -r archive_trigger_topic="${prefix}archive_trigger"
     declare -r cache_redirect_function_name="cache_redirect"
     declare cache_redirector_url="https://${FUNCTION_REGION}"
     declare cache_redirector_url+="-${project}.cloudfunctions.net/"
     declare cache_redirector_url+="${prefix}"
     declare -r cache_redirector_url+="${cache_redirect_function_name}"
-    declare -r updated_urls_topic="${prefix}updated_urls"
-    declare -r new_topic="${prefix}new"
-    declare -r new_load_subscription="${prefix}new_load"
-    declare -r new_debug_subscription="${prefix}new_debug"
-    declare -r updated_topic="${prefix}updated"
-    declare -r updated_debug_subscription="${prefix}updated_debug"
-    declare -r cost_topic="${prefix}cost"
     declare -r spool_collection_path="${prefix}notifications"
 
     declare -r psql_conn=$(
@@ -217,8 +201,6 @@ function execute_command() {
     fi
     declare -a -r bigquery_args
 
-    declare -r database="$psql_kcidb_db"
-
     if "$test"; then
         declare -r sqlite_clean_test_file="$TMPDIR/clean.sqlite3"
         touch "$sqlite_clean_test_file"
@@ -260,11 +242,6 @@ function execute_command() {
     # Register SMTP password secret
     password_secret_set "smtp" "$project" "$SECRETS_SMTP_PASSWORD"
 
-    declare -r smtp_topic=$("$smtp_mocked" && echo "${prefix}smtp" || true)
-    declare -r smtp_subscription=$(
-        "$smtp_mocked" && echo "${prefix}smtp_received" || true
-    )
-
     # Docker artifact repository name (must match [a-z0-9-]{0,62}[a-z0-9])
     declare -r docker_repo="${dashed_prefix}docker"
     # Cost monitor Cloud Run service name
@@ -295,26 +272,14 @@ function execute_command() {
         --cache-redirector-url="$cache_redirector_url"
         --optimize="$optimize"
         --heavy-asserts="$heavy_asserts"
-        --new-topic="$new_topic"
-        --new-load-subscription="$new_load_subscription"
-        --updated-publish="$updated_publish"
-        --updated-urls-publish="$updated_urls_publish"
-        --updated-topic="$updated_topic"
-        --load-queue-trigger-topic="$load_queue_trigger_topic"
-        --purge-db-trigger-topic="$purge_db_trigger_topic"
-        --archive-trigger-topic="$archive_trigger_topic"
-        --updated-urls-topic="$updated_urls_topic"
         --spool-collection-path="$spool_collection_path"
         --extra-cc="$extra_cc"
         --smtp-to-addrs="$smtp_to_addrs"
         --smtp-password-secret="$SECRETS_SMTP_PASSWORD"
-        --smtp-topic="$smtp_topic"
-        --smtp-subscription="$smtp_subscription"
         --pgpass-secret="$psql_pgpass_secret"
         --op-database="$psql_kcidb_db"
         --ar-database="$bigquery_kcidb_db"
         --sm-database="$bigquery_sample_kcidb_db"
-        --database="$database"
         --clean-test-databases="$clean_test_databases"
         --empty-test-databases="$empty_test_databases"
     )
@@ -345,7 +310,7 @@ function execute_command() {
     if [ "$command" != "shutdown" ]; then
         app_deploy "$project"
         services_enable "$project" appengine secretmanager cloudfunctions \
-                                   cloudbuild cloudscheduler firestore \
+                                   cloudbuild firestore \
                                    sqladmin storage run iam bigquery
 
         # Enable generating PostgreSQL superuser password (if not specified),
@@ -383,7 +348,7 @@ function execute_command() {
             --cost-upd-service-account="$cost_upd_service_account" \
             --iss-ed-service="$iss_ed_service" \
             --iss-ed-image="$iss_ed_image" \
-            --new-topic="$new_topic"
+            --rest-uri="$rest_uri"
         sections_run "$sections" firestore_deploy "$project"
         sections_run "$sections" storage_deploy "$project" "$cache_bucket_name"
         functions_deploy \
@@ -391,13 +356,6 @@ function execute_command() {
             --project="$project" \
             --prefix="$prefix" \
             --source="$(dirname "$(realpath "$0")")" \
-            --load-queue-trigger-topic="$load_queue_trigger_topic" \
-            --pick-notifications-trigger-topic \
-                "$pick_notifications_trigger_topic" \
-            --purge-db-trigger-topic "$purge_db_trigger_topic" \
-            --archive-trigger-topic "$archive_trigger_topic" \
-            --updated-urls-topic="$updated_urls_topic" \
-            --updated-topic="$updated_topic" \
             --cache-redirect-function-name="$cache_redirect_function_name" \
             --spool-collection-path="$spool_collection_path" \
             --env-yaml="${env_yaml}"
@@ -485,10 +443,6 @@ function usage_deploy() {
     echo "    --smtp-password-file=FILE"
     echo "              Specify a file with the SMTP server password,"
     echo "              or \"-\" to read it from stdin."
-    echo "    --smtp-mocked"
-    echo "              Post notification messages to a PubSub topic,"
-    echo "              instead of sending them to the SMTP server."
-    echo "              Used when testing deployments."
     echo "    --psql-password-file=FILE"
     echo "              Specify a file with the password for the PostgreSQL"
     echo "              superuser, or \"-\" to read it from stdin."
@@ -500,15 +454,8 @@ function usage_deploy() {
     echo "              environment. Default is an empty string."
     echo "    --heavy-asserts"
     echo "              Enable heavy assertion checking in deployment."
-    echo "    --mute-updates"
-    echo "              Disable posting updates about loaded data."
-    echo "    --mute-url-updates"
-    echo "              Disable posting updated artifact URLs."
     echo "    --test"
     echo "              Deploy test resources in various sections."
-    echo "    --submitter=NAME"
-    echo "              Specify a service account to permit submissions for."
-    echo "              Repeat to add more submitters."
     echo "    --cost-thresholds=JSON"
     echo "              Specify thresholds JSON for cost monitor."
     echo "              Must be an array of arrays, each subarray containing a"
@@ -521,6 +468,8 @@ function usage_deploy() {
     echo "              Permit public access to Grafana deployment in Cloud Run."
     echo "    --grafana-anonymous"
     echo "              Permit anonymous access to Grafana."
+    echo "    --rest-uri=URL"
+    echo "              REST endpoint for issue editor submissions."
     echo ""
     echo "Positional arguments:"
     echo ""
@@ -546,10 +495,6 @@ function usage_env() {
     echo "    --smtp-to-addrs=ADDRS"
     echo "              Specify a comma-separated list of addresses"
     echo "              to override recipients of email notifications."
-    echo "    --smtp-mocked"
-    echo "              Post notification messages to a PubSub topic,"
-    echo "              instead of sending them to the SMTP server."
-    echo "              Used when testing deployments."
     echo "    --log-level=NAME"
     echo "              Specify Python log level NAME for Cloud Functions."
     echo "              Default is INFO."
@@ -558,10 +503,6 @@ function usage_env() {
     echo "              environment. Default is an empty string."
     echo "    --heavy-asserts"
     echo "              Enable heavy assertion checking in deployment."
-    echo "    --mute-updates"
-    echo "              Disable posting updates about loaded data."
-    echo "    --mute-url-updates"
-    echo "              Disable posting updated artifact URLs."
     echo "    --test"
     echo "              Enable various test resources."
     echo ""
@@ -587,10 +528,6 @@ function usage_shell() {
     echo "    --smtp-to-addrs=ADDRS"
     echo "              Specify a comma-separated list of addresses"
     echo "              to override recipients of email notifications."
-    echo "    --smtp-mocked"
-    echo "              Expect notification messages to be posted to a"
-    echo "              PubSub topic, instead of being sent to the SMTP"
-    echo "              server."
     echo "    --log-level=NAME"
     echo "              Specify Python log level NAME for Cloud Functions."
     echo "              Default is INFO."
@@ -599,10 +536,6 @@ function usage_shell() {
     echo "              environment. Default is an empty string."
     echo "    --heavy-asserts"
     echo "              Enable heavy assertion checking in deployment."
-    echo "    --mute-updates"
-    echo "              Expect updates about loaded data to be disabled."
-    echo "    --mute-url-updates"
-    echo "              Expect posting of artifact URL updates to be disabled."
     echo "    --test"
     echo "              Expect various test resources to be deployed."
     echo ""
@@ -632,16 +565,9 @@ function usage_shutdown() {
     echo "              installation sections to limit shutdown to."
     echo "              See output of \"$(basename "$0") list-sections\""
     echo "              for a list of available sections."
-    echo "    --smtp-mocked"
-    echo "              The project being shut down uses a PubSub topic for"
-    echo "              receiving notification messages instead of the SMTP"
-    echo "              server"
     echo "    --test"
     echo "              The project being shut down has test resources"
     echo "              deployed."
-    echo "    --submitter=NAME"
-    echo "              Specify a service account to shutdown submissions"
-    echo "              for. Repeat to add more submitters."
     echo ""
     echo "Positional arguments:"
     echo ""
@@ -666,15 +592,8 @@ function usage_withdraw() {
     echo "              installation sections to limit withdrawal to."
     echo "              See output of \"$(basename "$0") list-sections\""
     echo "              for a list of available sections."
-    echo "    --smtp-mocked"
-    echo "              Withdraw the PubSub topic receiving notification"
-    echo "              messages instead of the SMTP server"
-    echo "              Used when testing deployments."
     echo "    --test"
     echo "              Withdraw test resources from various sections."
-    echo "    --submitter=NAME"
-    echo "              Specify a service account to deny submissions for."
-    echo "              Repeat to add more submitters."
     echo ""
     echo "Positional arguments:"
     echo ""
@@ -737,15 +656,14 @@ function execute() {
     declare getopt_longopts="help"
 
     if [[ $command == @(deploy|env|shell|shutdown|withdraw) ]]; then
-        getopt_longopts+=",smtp-mocked,test"
+        getopt_longopts+=",test"
         if [[ $command == @(deploy|shutdown|withdraw) ]]; then
             getopt_shortopts+="vs:"
-            getopt_longopts+=",verbose,sections:,submitter:"
+            getopt_longopts+=",verbose,sections:"
         fi
         if [[ $command == @(deploy|env|shell) ]]; then
             getopt_longopts+=",extra-cc:,smtp-to-addrs:"
             getopt_longopts+=",log-level:,optimize:,heavy-asserts"
-            getopt_longopts+=",mute-updates,mute-url-updates"
             if [[ $command == env ]]; then
                 getopt_longopts+=",format:"
             fi
@@ -757,6 +675,7 @@ function execute() {
             getopt_longopts+=",grafana-url:"
             getopt_longopts+=",grafana-public"
             getopt_longopts+=",grafana-anonymous"
+            getopt_longopts+=",rest-uri:"
         fi
     elif [ "$command" == "list-sections" ]; then
         :
@@ -777,19 +696,16 @@ function execute() {
     declare sections="*"
     declare extra_cc=""
     declare smtp_to_addrs=""
-    declare smtp_mocked="false"
     declare test="false"
     declare log_level="INFO"
     declare optimize=""
     declare heavy_asserts="false"
-    declare updated_publish="true"
-    declare updated_urls_publish="true"
-    declare -a submitters=()
     declare format="yaml"
     declare cost_thresholds="[]"
     declare grafana_url="http://localhost:3000"
     declare grafana_public="false"
     declare grafana_anonymous="false"
+    declare rest_uri=""
     while true; do
         case "$1" in
             -h|--help) "usage_${command//-/_}"; exit 0;;
@@ -798,21 +714,18 @@ function execute() {
             --extra-cc) extra_cc="$2"; shift 2;;
             --smtp-to-addrs) smtp_to_addrs="$2"; shift 2;;
             --smtp-password-file) password_set_file smtp "$2"; shift 2;;
-            --smtp-mocked) smtp_mocked="true"; shift;;
             --psql-password-file)
                 password_set_file psql_superuser "$2"; shift 2;;
             --log-level) log_level="$2"; shift 2;;
             --optimize) optimize="$2"; shift 2;;
             --heavy-asserts) heavy_asserts="true"; shift;;
-            --mute-updates) updated_publish="false"; shift;;
-            --mute-url-updates) updated_urls_publish="false"; shift;;
             --test) test="true"; shift;;
             --format) format="$2"; shift 2;;
-            --submitter) submitters+=("$2"); shift 2;;
             --cost-thresholds) cost_thresholds="$2"; shift 2;;
             --grafana-url) grafana_url="$2"; shift 2;;
             --grafana-public) grafana_public="true"; shift;;
             --grafana-anonymous) grafana_anonymous="true"; shift;;
+            --rest-uri) rest_uri="$2"; shift 2;;
             --) shift; break;;
             *) echo "Unknown option: $1" >&2; exit 1;;
         esac
@@ -869,14 +782,11 @@ function execute() {
                     --namespace="${namespace:-}${namespace:+_}kcidb" \
                     --extra-cc="$extra_cc" \
                     --smtp-to-addrs="$smtp_to_addrs" \
-                    --smtp-mocked="$smtp_mocked" \
                     --test="$test" \
                     --log-level="$log_level" \
                     --optimize="$optimize" \
                     --heavy-asserts="$heavy_asserts" \
-                    --updated-publish="$updated_publish" \
-                    --updated-urls-publish="$updated_urls_publish" \
-                    --submitters="${submitters[*]@Q}" \
+                    --rest-uri="$rest_uri" \
                     --cost-thresholds="$cost_thresholds" \
                     --grafana-url="$grafana_url" \
                     --grafana-public="$grafana_public" \
