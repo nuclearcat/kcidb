@@ -1,4 +1,5 @@
 """Kernel CI reporting - shared test fixtures"""
+# pylint: disable=invalid-name
 
 import os
 import atexit

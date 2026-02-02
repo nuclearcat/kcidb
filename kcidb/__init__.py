@@ -5,9 +5,10 @@ import email
 import logging
 import os
 import re
-import requests
 import concurrent.futures
 import time
+
+import requests
 from kcidb.misc import LIGHT_ASSERTS
 # Silence flake8 "imported but unused" warning
 from kcidb import io, db, orm, oo, monitor, tests, unittest, misc # noqa
@@ -180,6 +181,7 @@ class Client:
         # If we've exhausted all retries, raise the last error
         if last_error:
             raise last_error
+        raise RuntimeError("Retry attempts exhausted")
 
     def rest_submit(self, data):
         """Submit reports over REST API.
@@ -324,8 +326,8 @@ class Client:
             try:
                 submission_id = future.result()
                 submission_results.append((idx, submission_id, None))
-            except Exception as e:
-                LOGGER.error(f"Error submitting report: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                LOGGER.error("Error submitting report: %s", e)
                 submission_results.append((idx, None, e))
                 errors.append(e)
 
@@ -341,7 +343,6 @@ class Client:
             raise RuntimeError(
                 f"{len(errors)} submissions failed"
             ) from errors[0]
-        return
 
     # We can live with this for now, pylint: disable=too-many-arguments
     # Or if you prefer, pylint: disable=too-many-positional-arguments

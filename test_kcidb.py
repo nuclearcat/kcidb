@@ -121,6 +121,7 @@ def test_submit_main():
 def test_rest_uri_validation():
     """Check REST URI validation accepts local tokenless URIs."""
     client = kcidb.Client(rest_uri="http://localhost:8080/submit")
+    # pylint: disable=protected-access
     assert client._resturi == "http://localhost:8080/submit"
     try:
         kcidb.Client(rest_uri="https://example.com/submit")
