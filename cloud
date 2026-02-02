@@ -18,15 +18,12 @@ PATH="$(dirname "$(realpath "$0")")/kcidb/cloud:$PATH"
 
 . artifacts.sh
 . run.sh
-. submitters.sh
 . sections.sh
 . bigquery.sh
 . psql.sh
 . storage.sh
-. pubsub.sh
 . firestore.sh
 . functions.sh
-. scheduler.sh
 . password.sh
 . secrets.sh
 . iam.sh
@@ -387,25 +384,6 @@ function execute_command() {
             --iss-ed-service="$iss_ed_service" \
             --iss-ed-image="$iss_ed_image" \
             --new-topic="$new_topic"
-        sections_run "$sections" pubsub_deploy \
-            --project="$project" \
-            --load-queue-trigger-topic="$load_queue_trigger_topic" \
-            --new-topic="$new_topic" \
-            --new-load-subscription="$new_load_subscription" \
-            --new-debug-subscription="$new_debug_subscription" \
-            --updated-topic="$updated_topic" \
-            --updated-urls-topic="$updated_urls_topic" \
-            --updated-debug-subscription="$updated_debug_subscription" \
-            --pick-notifications-trigger-topic \
-                "$pick_notifications_trigger_topic" \
-            --purge-db-trigger-topic "$purge_db_trigger_topic" \
-            --archive-trigger-topic "$archive_trigger_topic" \
-            --smtp-topic="$smtp_topic" \
-            --smtp-subscription="$smtp_subscription" \
-            --cost-topic="$cost_topic" \
-            --cost-upd-service-account="$cost_upd_service_account" \
-            --cost-mon-service="$cost_mon_service" \
-            --iss-ed-service="$iss_ed_service"
         sections_run "$sections" firestore_deploy "$project"
         sections_run "$sections" storage_deploy "$project" "$cache_bucket_name"
         functions_deploy \
@@ -423,20 +401,8 @@ function execute_command() {
             --cache-redirect-function-name="$cache_redirect_function_name" \
             --spool-collection-path="$spool_collection_path" \
             --env-yaml="${env_yaml}"
-        sections_run "$sections" scheduler_deploy \
-            --project="$project" \
-            --prefix="$prefix" \
-            --load-queue-trigger-topic="$load_queue_trigger_topic" \
-            --pick-notifications-trigger-topic \
-                "$pick_notifications_trigger_topic" \
-            --purge-db-trigger-topic="$purge_db_trigger_topic" \
-            --archive-trigger-topic="$archive_trigger_topic"
-        sections_run "$sections" submitters_deploy \
-            "$project" "$new_topic" "${submitters[@]}"
     # Handle "shutdown" command
     elif [ "$command" == "shutdown" ]; then
-        sections_run "$sections" submitters_shutdown \
-            "$project" "$new_topic" "${submitters[@]}"
         functions_shutdown \
             --sections="$sections" \
             --project="$project" \
@@ -447,9 +413,6 @@ function execute_command() {
             --grafana-service="$grafana_service"
     # Handle "withdraw" command
     elif [ "$command" == "withdraw" ]; then
-        sections_run "$sections" submitters_withdraw \
-            "$project" "$new_topic" "${submitters[@]}"
-        sections_run "$sections" scheduler_withdraw "$project" "$prefix"
         functions_withdraw \
             --sections="$sections" \
             --project="$project" \
@@ -458,23 +421,6 @@ function execute_command() {
         sections_run "$sections" storage_withdraw "$cache_bucket_name"
         sections_run "$sections" firestore_withdraw \
             "$project" "$spool_collection_path"
-        sections_run "$sections" pubsub_withdraw \
-            --project="$project" \
-            --load-queue-trigger-topic="$load_queue_trigger_topic" \
-            --pick-notifications-trigger-topic \
-                "$pick_notifications_trigger_topic" \
-            --purge-db-trigger-topic "$purge_db_trigger_topic" \
-            --archive-trigger-topic "$archive_trigger_topic" \
-            --new-topic="$new_topic" \
-            --new-load-subscription="$new_load_subscription" \
-            --new-debug-subscription="$new_debug_subscription" \
-            --updated-urls-topic="$updated_urls_topic" \
-            --updated-topic="$updated_topic" \
-            --updated-debug-subscription="$updated_debug_subscription" \
-            --smtp-topic="$smtp_topic" \
-            --smtp-subscription="$smtp_subscription" \
-            --cost-topic="$cost_topic" \
-            --cost-upd-service-account="$cost_upd_service_account"
         sections_run "$sections" run_withdraw \
             --project="$project" \
             --grafana-service="$grafana_service" \

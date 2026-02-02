@@ -11,7 +11,6 @@ declare -A -r SECTIONS=(
     ["iam"]="Identity and Access Management"
     ["bigquery"]="BigQuery dataset"
     ["psql"]="PostgreSQL database"
-    ["pubsub"]="Pub/Sub topics and subscriptions"
     ["secrets"]="Secrets"
     ["firestore"]="Firestore database"
     ["storage"]="Google cloud storage"
@@ -23,8 +22,6 @@ declare -A -r SECTIONS=(
     ["functions.cache_redirect"]="Cloud Functions: kcidb_cache_redirect()"
     ["functions.cache_urls"]="Cloud Functions: kcidb_cache_urls()"
     ["functions.load_queue"]="Cloud Functions: kcidb_load_queue()"
-    ["scheduler"]="Scheduler jobs"
-    ["submitters"]="Submitter permissions"
     ["artifacts"]="Artifact repository"
     ["run"]="Cloud Run"
 )

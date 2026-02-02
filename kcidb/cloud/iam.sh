@@ -243,8 +243,6 @@ function iam_deploy() {
           - cloudfunctions.operations.get
           - run.services.getIamPolicy
           - run.services.setIamPolicy
-          - pubsub.topics.getIamPolicy
-          - pubsub.topics.setIamPolicy
 YAML_END
     iam_service_account_deploy "$project" "$cost_mon"
     mute gcloud projects add-iam-policy-binding \
