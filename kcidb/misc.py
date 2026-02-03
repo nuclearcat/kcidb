@@ -16,7 +16,10 @@ import dateutil
 import dateutil.relativedelta
 import dateutil.parser
 import jsonschema
-import jq
+try:
+    import jq
+except ImportError:  # pragma: no cover - optional dependency for parsing
+    jq = None
 import kcidb.io as io
 
 # Module's logger
@@ -40,6 +43,53 @@ LOGGING_LEVEL_MAP = {
 
 # Check light assertions only, if True
 LIGHT_ASSERTS = not os.environ.get("KCIDB_HEAVY_ASSERTS", "")
+
+
+class JSONParseError(ValueError):
+    """Raised when JSON parsing fails in the fallback parser."""
+
+
+def _json_parse_stream(text_iter):
+    """
+    Parse a stream of JSON values from chunks of text.
+
+    Args:
+        text_iter: Iterable yielding text chunks (str).
+
+    Yields:
+        Parsed JSON values.
+
+    Raises:
+        JSONParseError on invalid JSON.
+    """
+    decoder = json.JSONDecoder()
+    buffer = ""
+
+    for chunk in text_iter:
+        buffer += chunk
+        while True:
+            # Trim leading whitespace between values
+            idx = 0
+            while idx < len(buffer) and buffer[idx].isspace():
+                idx += 1
+            if idx:
+                buffer = buffer[idx:]
+            if not buffer:
+                break
+            try:
+                value, end = decoder.raw_decode(buffer)
+            except json.JSONDecodeError:
+                # Need more data
+                break
+            yield value
+            buffer = buffer[end:]
+
+    if buffer.strip():
+        try:
+            decoder.raw_decode(buffer.lstrip())
+        except json.JSONDecodeError as exc:
+            raise JSONParseError(str(exc)) from exc
+        raise JSONParseError("Trailing JSON data")
 
 
 def logging_setup(level):
@@ -451,7 +501,22 @@ def json_load_stream_fd(stream_fd, seq=False, chunk_size=4*1024*1024):
             else:
                 break
 
-    return jq.parse_json(text_iter=read_chunk(), seq=seq)
+    if jq is not None:
+        parse_json = getattr(jq, "parse_json", None)
+        if parse_json is not None:
+            return parse_json(text_iter=read_chunk(), seq=seq)
+
+    def text_iter():
+        for chunk in read_chunk():
+            try:
+                text = chunk.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise JSONParseError(str(exc)) from exc
+            if seq:
+                text = text.replace("\x1e", " ")
+            yield text
+
+    return _json_parse_stream(text_iter())
 
 
 # It's OK, pylint: disable=redefined-outer-name
