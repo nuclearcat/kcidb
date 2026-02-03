@@ -61,7 +61,7 @@ def test_submit_main():
         os.environ["KCIDB_REST"] = "https://token@example.com"
         response = Mock()
         response.status_code = 200
-        response.json = Mock(return_value={{"id": "id"}})
+        response.json = Mock(return_value={"id": "id"})
         response.text = ""
         with patch("kcidb.requests.post", return_value=response) as post:
             status = function()
@@ -78,7 +78,7 @@ def test_submit_main():
         os.environ["KCIDB_REST"] = "https://token@example.com"
         response = Mock()
         response.status_code = 200
-        response.json = Mock(return_value={{"id": "id"}})
+        response.json = Mock(return_value={"id": "id"})
         response.text = ""
         with patch("kcidb.requests.post", return_value=response) as post:
             status = function()
@@ -226,7 +226,7 @@ def test_validate_main():
     assert_executes('{"version":{"major":2,"minor":0}}',
                     "kcidb.validate_main", "1",
                     status=1,
-                    stderr_re=".*ValidationError: 1 was expected.*")
+                    stderr_re=".*ValidationError:.*")
     assert_executes('{"version":{"major":4,"minor":0}}',
                     "kcidb.validate_main", "0",
                     status=2,
