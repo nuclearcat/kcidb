@@ -226,6 +226,7 @@ def test_validate_main():
     assert_executes('{"version":{"major":2,"minor":0}}',
                     "kcidb.validate_main", "1",
                     status=1,
+                    # jsonschema error wording varies by version; keep loose.
                     stderr_re=".*ValidationError:.*")
     assert_executes('{"version":{"major":4,"minor":0}}',
                     "kcidb.validate_main", "0",
